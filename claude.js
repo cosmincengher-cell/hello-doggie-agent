@@ -59,7 +59,7 @@ Răspunde DOAR cu un obiect JSON valid, fără markdown, fără backticks, făr�
 }`;
 
   try {
-    console.log("Calling Claude API with model claude-opus-4-5...");
+    console.log("Calling Claude API with model claude-3-5-sonnet-20241022...");
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -69,7 +69,7 @@ Răspunde DOAR cu un obiect JSON valid, fără markdown, fără backticks, făr�
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-opus-4-5",
+        model: "claude-3-5-sonnet-20241022",
         max_tokens: 1024,
         messages: [
           {
