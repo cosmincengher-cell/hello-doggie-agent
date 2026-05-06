@@ -1,23 +1,35 @@
 exports.handler = async (event) => {
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 200, body: "" };
+  }
+
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: "Method Not Allowed" };
+    return { statusCode: 405, body: JSON.stringify({ error: "Method Not Allowed" }) };
   }
 
   const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
   if (!CLAUDE_API_KEY) {
-    return { statusCode: 500, body: JSON.stringify({ error: "Missing CLAUDE_API_KEY" }) };
+    console.error("CLAUDE_API_KEY is not set");
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "CLAUDE_API_KEY lipsește — adaugă-l în Netlify > Site Settings > Environment Variables" }),
+    };
+  }
+
+  if (!event.body) {
+    return { statusCode: 400, body: JSON.stringify({ error: "Request body is empty" }) };
   }
 
   let body;
   try {
     body = JSON.parse(event.body);
-  } catch {
-    return { statusCode: 400, body: JSON.stringify({ error: "Invalid JSON" }) };
+  } catch (e) {
+    return { statusCode: 400, body: JSON.stringify({ error: "JSON invalid: " + e.message }) };
   }
 
   const { imageBase64, mediaType, formData } = body;
   if (!imageBase64 || !mediaType) {
-    return { statusCode: 400, body: JSON.stringify({ error: "Missing imageBase64 or mediaType" }) };
+    return { statusCode: 400, body: JSON.stringify({ error: "Lipsește imageBase64 sau mediaType" }) };
   }
 
   const fd = formData || {};
@@ -47,6 +59,8 @@ Răspunde DOAR cu un obiect JSON valid, fără markdown, fără backticks, făr�
 }`;
 
   try {
+    console.log("Calling Claude API with model claude-opus-4-5...");
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -76,25 +90,67 @@ Răspunde DOAR cu un obiect JSON valid, fără markdown, fără backticks, făr�
       }),
     });
 
-    const data = await response.json();
+    console.log("Claude API response status:", response.status);
+
+    // Read body as text first to avoid empty body issues
+    const responseText = await response.text();
+    console.log("Claude raw response (first 300 chars):", responseText.substring(0, 300));
+
+    if (!responseText || responseText.trim() === "") {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: "Claude API a returnat un răspuns gol" }),
+      };
+    }
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: "Răspuns invalid de la Claude: " + responseText.substring(0, 200) }),
+      };
+    }
 
     if (!response.ok) {
+      console.error("Claude API error:", data);
       return {
         statusCode: response.status,
-        body: JSON.stringify({ error: data.error?.message || "Claude API error" }),
+        body: JSON.stringify({ error: data.error?.message || "Claude API error: " + JSON.stringify(data) }),
       };
     }
 
     const rawText = data.content?.[0]?.text || "";
+    console.log("Claude text response:", rawText.substring(0, 300));
+
+    if (!rawText) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: "Claude nu a returnat text în răspuns" }),
+      };
+    }
+
     let parsed;
     try {
       parsed = JSON.parse(rawText);
     } catch {
+      // Try to extract JSON from text
       const match = rawText.match(/\{[\s\S]*\}/);
       if (match) {
-        parsed = JSON.parse(match[0]);
+        try {
+          parsed = JSON.parse(match[0]);
+        } catch (e2) {
+          return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "Nu s-a putut parsa JSON din răspunsul Claude: " + rawText.substring(0, 200) }),
+          };
+        }
       } else {
-        throw new Error("Could not parse JSON from Claude response");
+        return {
+          statusCode: 500,
+          body: JSON.stringify({ error: "Claude nu a returnat JSON valid: " + rawText.substring(0, 200) }),
+        };
       }
     }
 
@@ -103,10 +159,12 @@ Răspunde DOAR cu un obiect JSON valid, fără markdown, fără backticks, făr�
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(parsed),
     };
+
   } catch (err) {
+    console.error("Fetch error:", err);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: err.message }),
+      body: JSON.stringify({ error: "Eroare de rețea: " + err.message }),
     };
   }
 };
