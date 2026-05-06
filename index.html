@@ -870,11 +870,22 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageBase64, mediaType, formData }),
         });
-        if (!claudeRes.ok) {
-          const err = await claudeRes.json();
-          throw new Error(err.error || 'Eroare Claude API');
+
+        // Always read as text first to avoid "Unexpected end of JSON" errors
+        const claudeText = await claudeRes.text();
+        if (!claudeText || claudeText.trim() === '') {
+          throw new Error('Funcția Claude a returnat un răspuns gol. Verifică API key-ul în Netlify → Environment Variables.');
         }
-        agentData = await claudeRes.json();
+        let claudeJson;
+        try {
+          claudeJson = JSON.parse(claudeText);
+        } catch(e) {
+          throw new Error('Răspuns invalid de la server: ' + claudeText.substring(0, 150));
+        }
+        if (!claudeRes.ok) {
+          throw new Error(claudeJson.error || 'Eroare Claude API (status ' + claudeRes.status + ')');
+        }
+        agentData = claudeJson;
 
         // Merge user-provided fields into agentData
         if (formData.numeAgent) agentData.numeAgent = formData.numeAgent;
@@ -897,11 +908,16 @@
               specie: agentData.specie,
             }),
           });
-          if (falRes.ok) {
-            const falData = await falRes.json();
-            if (falData.imageUrl) {
-              stylizedImageUrl = falData.imageUrl;
-              falSuccess = true;
+          const falText = await falRes.text();
+          if (falText && falText.trim() !== '') {
+            try {
+              const falData = JSON.parse(falText);
+              if (falData.imageUrl) {
+                stylizedImageUrl = falData.imageUrl;
+                falSuccess = true;
+              }
+            } catch(e) {
+              console.warn('fal.ai JSON parse failed:', falText.substring(0, 100));
             }
           }
         } catch (falErr) {
